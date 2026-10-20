@@ -1,0 +1,73 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+    volumes:
+      - media:/app/media
+
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./app
+          target: /app/app
+          initial_sync: true
+          ignore:
+            - __pycache__/
+            - "*.pyc"
+            - .pytest_cache/
+            - "*.pyo"
+
+        # 2. Rebuild the image when dependencies change
+        - action: rebuild
+          path: ./pyproject.toml
+
+        - action: rebuild
+          path: ./uv.lock
+
+        # Optional: also watch alembic if you want
+        - action: sync+restart
+          path: ./alembic
+          target: /app/alembic
+
+  postgres:
+    image: timescale/timescaledb-ha:pg18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+
+  frontend:
+    image: python:3.13-slim-bookworm
+    working_dir: /frontend
+    volumes:
+      - ./frontend:/frontend
+      - media:/frontend/media
+    ports:
+      - "7000:7000"
+    depends_on:
+      - app
+    command: ["python3", "-m", "http.server", "7000"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  media:
