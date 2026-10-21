@@ -1,9 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import (
-    AliasChoices,
     Field,
     PostgresDsn,
-    RedisDsn,
     SecretStr
 )
 
@@ -14,12 +12,18 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    REDIS_URL: RedisDsn
     POSTGRES_USER: str
     POSTGRES_PASSWORD: SecretStr
     POSTGRES_DB: str
     POSTGRES_HOST: str
     POSTGRES_PORT: int
+
+
+    # JWT
+    JWT_SECRET: SecretStr
+    JWT_ALGORITHM: str = Field("HS256", validation_alias='jwt_algo')
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 90
+
 
     ENVIRONMENT: str = "DEV" # OR PROD
 
