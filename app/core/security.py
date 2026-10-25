@@ -1,17 +1,26 @@
-from __future__ import annotations
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
+import hashlib
+
+from fastapi.security import OAuth2PasswordBearer
 from pwdlib import PasswordHash
 from app.core.config import settings
-from fastapi.security import OAuth2PasswordBearer
 import jwt
-import hashlib
 import secrets
+
+
 
 
 password_hash = PasswordHash.recommended()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login",
+    auto_error=False
+)
 
+
+
+# ========= HELPER ============
 
 def hash_password(plain_password: str) -> str:
     return password_hash.hash(plain_password)
@@ -51,7 +60,7 @@ def verify_access_token(token: str) -> str | None:
             token,
             settings.JWT_SECRET.get_secret_value(),
             algorithms=[settings.JWT_ALGORITHM],
-            options={"require": ["exp", "sub", "role"]}
+            options={"require": ["exp", "sub"]}
         )
     
     except jwt.InvalidTokenError:
