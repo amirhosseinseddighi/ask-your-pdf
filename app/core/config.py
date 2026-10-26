@@ -27,6 +27,12 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "DEV" # OR PROD
 
+
+
+    # LLM Provider Settings
+    LLM_BASE_URL: str = Field("http://localhost:20128/v1")
+    LLM_API_KEY: SecretStr 
+
     # LOGGING
     LOG_LEVEL: str = "INFO"
     

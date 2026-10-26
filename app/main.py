@@ -8,6 +8,7 @@ from app.core.logging_configure import setup_logging
 from app.core.config import settings
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import v1
+from openai import AsyncOpenAI
 
 
 logger = structlog.get_logger()
@@ -16,9 +17,23 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     IS_DEV = settings.ENVIRONMENT != "PROD"
     setup_logging(is_dev=IS_DEV)
+    
+    # create llm client
+    app.state.llm_client =  AsyncOpenAI(
+        base_url=settings.LLM_BASE_URL,
+        api_key=settings.LLM_API_KEY.get_secret_value(),
+        timeout=60.0,
+        max_retries=3,
+    )
+
     logger.info("Application setup completed! starting server...")
-    yield
-    logger.info("Application shutted down successfuly! shutting down server...")
+
+    
+    try:
+        yield
+    finally:
+        await app.state.llm_client.close()
+        logger.info("Application shutted down successfuly! shutting down server...")
 
 
 origins = [

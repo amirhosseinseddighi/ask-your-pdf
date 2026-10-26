@@ -1,6 +1,7 @@
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
+from openai import AsyncOpenAI, OpenAI
 from sqlalchemy import select
 import structlog
 
@@ -81,7 +82,11 @@ async def get_optional_current_user(
     return user
 
 
+async def get_ai_client():
+    return app.state.llm_client
+
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[Optional[User], Depends(get_optional_current_user)]
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
+LLMClient = Annotated[AsyncOpenAI, Depends(get_ai_client)]
