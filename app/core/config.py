@@ -28,9 +28,11 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "DEV" # OR PROD
 
 
+    EMBEDDING_MODEL_NAME: str = "gemini-embedding-001"
+
 
     # LLM Provider Settings
-    LLM_BASE_URL: str = Field("http://localhost:20128/v1")
+    LLM_BASE_URL: str = Field("http://host.docker.internal:20128/v1")
     LLM_API_KEY: SecretStr 
 
     # LOGGING

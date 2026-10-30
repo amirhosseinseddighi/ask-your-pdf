@@ -1,7 +1,8 @@
 from fastapi import status
 import pytest
 from httpx import AsyncClient
-from tests.conftest import create_test_user, login_user, auth_header
+from app.models import DocumentState
+from tests.conftest import create_project, create_user_and_login, make_pdf, upload
 
 
 # ============= CREATE PROJECT =============
@@ -9,9 +10,7 @@ from tests.conftest import create_test_user, login_user, auth_header
 @pytest.mark.anyio
 async def test_create_project_success(client: AsyncClient):
     """Test creating a project successfully when authenticated."""
-    await create_test_user(client, username="creator@example.com")
-    token = await login_user(client, username="creator@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     response = await client.post(
         "/api/v1/projects",
@@ -48,9 +47,7 @@ async def test_create_project_unauthenticated(client: AsyncClient):
 @pytest.mark.anyio
 async def test_create_project_validation_error(client: AsyncClient):
     """Test creating a project with missing or invalid fields fails with 422."""
-    await create_test_user(client, username="user@example.com")
-    token = await login_user(client, username="user@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     # Missing description
     response = await client.post(
@@ -67,9 +64,7 @@ async def test_create_project_validation_error(client: AsyncClient):
 async def test_list_projects_success(client: AsyncClient):
     """Test listing projects for the authenticated user with pagination and isolation."""
     # User A
-    await create_test_user(client, username="userA@example.com", password="Pass@123456")
-    token_a = await login_user(client, username="userA@example.com", password="Pass@123456")
-    headers_a = auth_header(token_a)
+    headers_a = await create_user_and_login(client, username="userA@example.com")
 
     # Create two projects for User A
     for i in range(2):
@@ -80,9 +75,7 @@ async def test_list_projects_success(client: AsyncClient):
         )
 
     # User B
-    await create_test_user(client, username="userB@example.com", password="Pass@123456")
-    token_b = await login_user(client, username="userB@example.com", password="Pass@123456")
-    headers_b = auth_header(token_b)
+    headers_b = await create_user_and_login(client)
 
     # Create one project for User B
     await client.post(
@@ -109,9 +102,7 @@ async def test_list_projects_success(client: AsyncClient):
 @pytest.mark.anyio
 async def test_get_project_success(client: AsyncClient):
     """Test retrieving a specific project by ID."""
-    await create_test_user(client, username="owner@example.com")
-    token = await login_user(client, username="owner@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     # Create project
     create_res = await client.post(
@@ -131,9 +122,7 @@ async def test_get_project_success(client: AsyncClient):
 @pytest.mark.anyio
 async def test_get_project_not_found(client: AsyncClient):
     """Test fetching a non-existent project returns 404."""
-    await create_test_user(client, username="user@example.com")
-    token = await login_user(client, username="user@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     response = await client.get("/api/v1/projects/99999", headers=headers)
     assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -143,20 +132,18 @@ async def test_get_project_not_found(client: AsyncClient):
 async def test_get_other_user_project_forbidden(client: AsyncClient):
     """Test that a user cannot access another user's project (returns 404 due to ownership scoping)."""
     # User 1 creates a project
-    await create_test_user(client, username="user1@example.com", password="Pass@123456")
-    token1 = await login_user(client, username="user1@example.com", password="Pass@123456")
+    headers_1 = await create_user_and_login(client)
     create_res = await client.post(
         "/api/v1/projects",
         json={"name": "User1 Project", "description": "Private"},
-        headers=auth_header(token1)
+        headers=headers_1
     )
     project_id = create_res.json()["id"]
 
     # User 2 tries to access User 1's project
-    await create_test_user(client, username="user2@example.com", password="Pass@123456")
-    token2 = await login_user(client, username="user2@example.com", password="Pass@123456")
+    headers_2 = await create_user_and_login(client, username="user2@gmail.com")
     
-    response = await client.get(f"/api/v1/projects/{project_id}", headers=auth_header(token2))
+    response = await client.get(f"/api/v1/projects/{project_id}", headers=headers_2)
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
@@ -165,9 +152,7 @@ async def test_get_other_user_project_forbidden(client: AsyncClient):
 @pytest.mark.anyio
 async def test_update_project_success(client: AsyncClient):
     """Test updating a project (partial update via PATCH)."""
-    await create_test_user(client, username="updater@example.com")
-    token = await login_user(client, username="updater@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     create_res = await client.post(
         "/api/v1/projects",
@@ -192,9 +177,7 @@ async def test_update_project_success(client: AsyncClient):
 @pytest.mark.anyio
 async def test_update_project_not_found(client: AsyncClient):
     """Test updating a non-existent project returns 404."""
-    await create_test_user(client, username="user@example.com")
-    token = await login_user(client, username="user@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     response = await client.patch(
         "/api/v1/projects/99999",
@@ -209,9 +192,7 @@ async def test_update_project_not_found(client: AsyncClient):
 @pytest.mark.anyio
 async def test_delete_project_success(client: AsyncClient):
     """Test deleting an owned project successfully."""
-    await create_test_user(client, username="deleter@example.com")
-    token = await login_user(client, username="deleter@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     create_res = await client.post(
         "/api/v1/projects",
@@ -232,9 +213,7 @@ async def test_delete_project_success(client: AsyncClient):
 @pytest.mark.anyio
 async def test_delete_project_not_found(client: AsyncClient):
     """Test deleting a non-existent project returns 404."""
-    await create_test_user(client, username="user@example.com")
-    token = await login_user(client, username="user@example.com")
-    headers = auth_header(token)
+    headers = await create_user_and_login(client)
 
     response = await client.delete("/api/v1/projects/99999", headers=headers)
     assert response.status_code == status.HTTP_404_NOT_FOUND

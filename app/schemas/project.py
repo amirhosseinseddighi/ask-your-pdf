@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models import DocumentState
+
 
 class ProjectBase(BaseModel):
     name: str = Field(..., max_length=200, description="Name of the project")
@@ -27,3 +29,8 @@ class ProjectResponse(ProjectBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentUploadResponse(BaseModel):
+    document_id: int
+    status: DocumentState

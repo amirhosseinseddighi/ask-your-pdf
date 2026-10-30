@@ -17,6 +17,7 @@ dependencies = [
     "pwdlib[argon2]>=0.3.0",
     "pydantic-settings>=2.15.0",
     "pyjwt>=2.13.0",
+    "pymupdf>=2.0",
     "pymupdf4llm>=2.0",
     "python-slugify>=8.0.4",
     "redis>=8.1.0",

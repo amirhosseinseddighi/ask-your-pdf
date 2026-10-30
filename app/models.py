@@ -72,6 +72,7 @@ class Documents(Base):
         index=True
     )
     filename: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    temp_path: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[DocumentState] = mapped_column(
         SQLEnum(
             DocumentState,

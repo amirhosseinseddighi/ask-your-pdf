@@ -1,17 +1,44 @@
-from typing import List
-from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+import asyncio
+from hashlib import sha256
+import os
+from pathlib import Path
+from typing import Annotated, List
+import uuid
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 import structlog
+from sqlalchemy import select
 
-from app.models import Project
-from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
-from app.core.deps import CurrentUser, SessionDep
+from app.models import DocumentState, Documents, Project
+from app.schemas.project import DocumentUploadResponse, ProjectCreate, ProjectResponse, ProjectUpdate
+from app.core.deps import CurrentUser, LLMClient, OwnedProject, SessionDep
+
+from app.services.document_service import ingest_document
+
 
 logger = structlog.get_logger()
+
+# ========== CONSTANTS ===========
+TEMP_FILE_DIRECTORY = "/app/tmp/documents/"
+CHUNK_SIZE = 1024 * 1024
+MAX_DOCUMENT_SIZE = 1024 * 1024 * 20
+MAX_DOCUMENTS_PER_PROJECT=10
+MAX_FILENAME_LENGTH=200
+
+# make temp files directory
+try:
+    os.makedirs(os.path.dirname(TEMP_FILE_DIRECTORY), exist_ok=True)
+except:
+    logger.error("create temp file directory failed")
+
+
+
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
+# ============== PROJECT CRUD =============
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     project_in: ProjectCreate,
@@ -129,3 +156,111 @@ async def delete_project(
     await db.delete(project)
     await db.commit()
     return None
+
+
+
+
+
+
+# ==================== DOCUMENTS ====================
+@router.post(
+    "/{project_id}/documents",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=DocumentUploadResponse,
+)
+async def upload_document_pdf(
+    pdf_document: Annotated[UploadFile, File(description="PDF Document")],
+    background_tasks: BackgroundTasks,
+    llm_client: LLMClient,
+    db: SessionDep,
+    project: OwnedProject,
+):
+    if pdf_document.content_type != "application/pdf":
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Only PDFs are allowed")
+
+    if pdf_document.size is not None and pdf_document.size > MAX_DOCUMENT_SIZE:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "The PDF is too large")
+
+    doc_count = await db.scalar(
+        select(func.count()).select_from(Documents).where(Documents.project_id == project.id)
+    )
+    if doc_count >= MAX_DOCUMENTS_PER_PROJECT:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Document limit reached for this project")
+
+    original_name = Path(pdf_document.filename or "document.pdf").name[:MAX_FILENAME_LENGTH]
+    dst_path = Path(TEMP_FILE_DIRECTORY) / f"{uuid.uuid4()}.pdf"
+    handed_off = False
+
+    try:
+        total_length = 0
+        sha = sha256()
+        with open(dst_path, "wb") as buffer:
+            while chunk := await pdf_document.read(CHUNK_SIZE):
+                if total_length == 0 and not chunk.startswith(b"%PDF-"):
+                    raise HTTPException(
+                        status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "File is not a valid PDF"
+                    )
+                total_length += len(chunk)
+                if total_length > MAX_DOCUMENT_SIZE:
+                    raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "The PDF is too large")
+                sha.update(chunk)
+                await asyncio.to_thread(buffer.write, chunk)
+
+        if total_length == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty")
+
+        document_hash = sha.hexdigest()
+
+        existing_id = await db.scalar(
+            select(Documents.id).where(
+                Documents.project_id == project.id,
+                Documents.content_hash == document_hash,
+            )
+        )
+        if existing_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="This document was already uploaded to this project",
+            )
+
+        new_doc = Documents(
+            project_id=project.id,
+            filename=original_name,
+            temp_path=str(dst_path),
+            status=DocumentState.PENDING,
+            content_hash=document_hash,
+        )
+        db.add(new_doc)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="This document was already uploaded to this project",
+            )
+        await db.refresh(new_doc)
+
+        background_tasks.add_task(
+            ingest_document,
+            project_id=project.id,
+            doc_id=new_doc.id,
+            client=llm_client,
+            file_path=str(dst_path),
+        )
+        handed_off = True
+        return DocumentUploadResponse(document_id=new_doc.id, status=new_doc.status)
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("document_upload_failed", project_id=project.id)
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Something went wrong. Please try again"
+        )
+    finally:
+        if not handed_off:
+            dst_path.unlink(missing_ok=True)
+
+    
+

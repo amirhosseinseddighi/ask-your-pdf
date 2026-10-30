@@ -178,3 +178,42 @@ async def login_user(
 
 def auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+
+async def create_user_and_login(client: AsyncClient, username="user@example.com"):
+    await create_test_user(client, username=username)
+    token = await login_user(client, username=username)
+    headers = auth_header(token)
+    return headers
+
+
+# ============== DOCUMENT AND PROJECT HELPERS =================
+def make_pdf(tag: str = "a") -> bytes:
+    """Tiny fake PDF. Different `tag` => different sha256 hash."""
+    return b"%PDF-1.4\n% " + tag.encode() + b"\n%%EOF\n"
+
+
+async def create_project(client: AsyncClient, headers: dict, name: str = "My project") -> int:
+    payload = {
+        "name": name,
+        "description": "Wow"
+    }
+    resp = await client.post("/api/v1/projects", json=payload, headers=headers)
+    assert resp.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED), resp.text
+    return resp.json()["id"]
+
+
+async def upload(
+    client: AsyncClient,
+    headers: dict,
+    project_id: int,
+    content: bytes,
+    filename: str = "doc.pdf",
+    content_type: str = "application/pdf",
+):
+    return await client.post(
+        f"/api/v1/projects/{project_id}/documents",
+        files={"pdf_document": (filename, content, content_type)},
+        headers=headers,
+    )
