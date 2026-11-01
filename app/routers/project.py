@@ -12,8 +12,8 @@ from sqlalchemy import select
 
 from app.models import DocumentState, Documents, Project
 from app.schemas.project import DocumentUploadResponse, ProjectCreate, ProjectResponse, ProjectUpdate
-from app.core.deps import CurrentUser, LLMClient, OwnedProject, SessionDep
-
+from app.core.deps import CurrentUser, LLMClient, OwnedDocument, OwnedProject, SessionDep
+from sqlalchemy import delete as SQLDelete
 from app.services.document_service import ingest_document
 
 
@@ -264,3 +264,19 @@ async def upload_document_pdf(
 
     
 
+
+
+
+@router.delete(
+        "/{project_id}/documents/{document_id}", 
+        status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_document(
+    db: SessionDep,
+    current_user: CurrentUser,
+    project: OwnedProject,
+    document: OwnedDocument
+):
+    """ Delete a document and it's embeddings """
+    await db.delete(document)
+    await db.commit()
