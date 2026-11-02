@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # LLM Provider Settings
     LLM_BASE_URL: str = Field("http://host.docker.internal:20128/v1")
     LLM_API_KEY: SecretStr 
-
+    LLM_MODEL_NAME: str = "gemini-combo"
     # LOGGING
     LOG_LEVEL: str = "INFO"
     

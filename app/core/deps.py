@@ -121,6 +121,7 @@ async def get_owned_document(
 
 
 
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[Optional[User], Depends(get_optional_current_user)]
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
