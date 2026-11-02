@@ -1,6 +1,8 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from pydantic import Field
 import structlog
@@ -11,11 +13,16 @@ from app.helpers.chat_and_project_helpers import (
     check_project_exists_and_belong_to_the_user
 )
 from app.models import ChatSession
-from app.schemas.chat import ChatMessageRequest, ChatMessageResponse, CreateChatSessionRequest, CreateChatSessionResponse
+from app.schemas.chat import ChatMessageRequest, CreateChatSessionRequest, CreateChatSessionResponse
 from app.services.chat_service import chat_service
 
 
 logger = structlog.get_logger()
+
+
+# ========== HELPERS ==============
+def sse(event: dict):
+    return f"data: {json.dumps(event)}\n\n"
 
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -65,7 +72,7 @@ async def get_chat_history(
 
 
 
-@router.post("/{chat_id}", response_model=ChatMessageResponse)
+@router.post("/{chat_id}")
 async def do_chat(
     current_user: CurrentUser,
     chat_id: UUID,
@@ -77,22 +84,31 @@ async def do_chat(
 
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Chat session not found")
 
-    try:
-        answer = await chat_service.ask(
-            session_id=chat_session.id,
-            project_id=chat_session.project_id,
-            user_query=chat_request.message,
-            client=llm_client,
-        )
-    except RateLimitError:
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail="Service is busy, try again shortly")
-    except (APITimeoutError, APIConnectionError):
-        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, detail="The AI service timed out")
-    except APIStatusError:
-        logger.exception("OpenAI API error")
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="The AI service returned an error")
 
-    return ChatMessageResponse(answer=answer)
+    async def event_generator():
+        try:
+            async for answer in chat_service.ask_stream(
+                session_id=chat_session.id,
+                project_id=chat_session.project_id,
+                user_query=chat_request.message,
+                client=llm_client,
+            ):
+                yield sse(answer)
+        except RateLimitError:
+            yield sse({"type": "error", "content": "Service is busy, try again shortly"})
+        except (APITimeoutError, APIConnectionError):
+            yield sse({"type": "error", "content": "The AI service timed out"})
+        except APIStatusError:
+            logger.exception("LLM API error")
+            yield sse({"type": "error", "content": "The AI service returned an error"})
+        except Exception:
+            logger.exception("Unexpected error while streaming")
+            yield sse({"type": "error", "content": "Something went wrong"})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
 
     
 

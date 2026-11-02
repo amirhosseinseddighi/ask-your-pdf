@@ -1,4 +1,5 @@
 import json
+from typing import AsyncGenerator
 from uuid import UUID
 
 from openai import AsyncOpenAI
@@ -48,14 +49,15 @@ class ChatService:
             {"role": "user", "content": user_query},
         ]
 
-    async def run_tool(self, tool_call, project_id: int, client: AsyncOpenAI) -> str:
-        args = json.loads(tool_call.function.arguments)
+    async def run_tool(self, name: str, arguments: str, project_id: int, client: AsyncOpenAI) -> str:
+        try:
+            args = json.loads(arguments or "{}")
+        except json.JSONDecodeError:
+            return "Error: invalid tool arguments."
 
-        logger.info("tool_call", tool_call = tool_call, project_id = project_id)
-        
-        if tool_call.function.name == "get_relevant_information":
+        if name == "get_relevant_information":
             chunks = await retrieval_service.get_relevant_chunks_from_user_query(
-                user_query=args["query"],
+                user_query=args.get("query", ""),
                 project_id=project_id,
                 client=client,
             )
@@ -63,10 +65,9 @@ class ChatService:
                 return "No relevant information found in the documents."
             return "\n\n---\n\n".join(chunks)
 
-        
+        return f"Unknown tool: {name}"
 
-        return f"Unknown tool: {tool_call.function.name}"
-
+    
 
     async def get_chat_session_history(self,session_id: UUID):
         """
@@ -91,51 +92,86 @@ class ChatService:
         return history
 
 
-    async def ask(self, session_id: UUID, project_id: int, user_query: str, client: AsyncOpenAI) -> str:
+    async def ask_stream(self, session_id: UUID, project_id: int, user_query: str, client: AsyncOpenAI) -> AsyncGenerator:
         history = await self.get_recent_messages(session_id)
         messages = self.build_input(history, user_query)
 
-        answer = None
+        final_parts = []
+
         for _ in range(MAX_TOOL_ROUNDS):
+
+            round_text: list[str] = list()
+            calls: dict[int, dict] = {}
+
             response = await client.chat.completions.create(
                 model=settings.LLM_MODEL_NAME,
                 messages=messages,
                 tools=Tools.tools,
+                stream=True
             )
-            msg = response.choices[0].message
 
-            if not msg.tool_calls:
-                answer = msg.content
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+
+                if delta.content:
+                    round_text.append(delta.content)
+                    yield {"type": "token", "content": delta.content}
+
+
+                if delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        idx = tool_call.index if tool_call.index is not None else 0
+                        entry = calls.setdefault(idx, {"id": "", "name": "","arguments": ""})
+                        if tool_call.id:
+                            entry['id'] = tool_call.id
+
+                        if tool_call.function:
+                            if tool_call.function.name:
+                                entry['name'] += tool_call.function.name
+
+                            if tool_call.function.arguments:
+                                entry['arguments'] += tool_call.function.arguments
+
+            # the round is done here
+            if not calls:
+                final_parts = round_text
                 break
 
-            # Add the assistant's tool-call message to the context
+            all_calls = [calls[i] for i in sorted(calls)]
+
             messages.append({
                 "role": "assistant",
-                "content": msg.content,
+                "content": "".join(round_text) or None,
                 "tool_calls": [
                     {
-                        "id": tc.id,
+                        "id": c["id"],
                         "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        "function": {"name": c["name"], "arguments": c["arguments"]},
                     }
-                    for tc in msg.tool_calls
+                    for c in all_calls
                 ],
             })
 
-            # Run each tool and add its result
-            for tc in msg.tool_calls:
-                result = await self.run_tool(tc, project_id, client)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+            yield {"type": "status", "content": "searching_documents"}
 
+
+            for c in all_calls:
+                result = await self.run_tool(c["name"], c["arguments"], project_id, client)
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+
+        answer = "".join(final_parts).strip()
         if not answer:
             answer = "Sorry, I couldn't find an answer. Please try rephrasing your question."
+            yield {"type": "token", "content": answer}
 
         await self.save_exchange(session_id, user_query, answer)
-        return answer
+        yield {"type": "done"}
+
+            
+                    
 
 
 chat_service = ChatService()
