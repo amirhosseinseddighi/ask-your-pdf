@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from pydantic import Field
+from sqlalchemy import select
 import structlog
 
 from app.core.deps import CurrentUser, LLMClient, SessionDep
@@ -26,6 +27,7 @@ def sse(event: dict):
 
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
 
 @router.post("/creating", response_model=CreateChatSessionResponse)
 async def create_chat_session(

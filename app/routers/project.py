@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
 import structlog
 from sqlalchemy import select
 
-from app.models import DocumentState, Documents, Project
+from app.models import ChatSession, DocumentState, Documents, Project
+from app.schemas.chat import ChatSessionResponse
 from app.schemas.project import DocumentUploadResponse, ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.deps import CurrentUser, LLMClient, OwnedDocument, OwnedProject, SessionDep
 from sqlalchemy import delete as SQLDelete
@@ -157,6 +158,24 @@ async def delete_project(
     await db.commit()
     return None
 
+
+
+# ======== LIST PROJECT CHATS ===========
+@router.get("/{project_id}/chats")
+async def get_all_chat_sessions(
+    current_user: CurrentUser,
+    db: SessionDep,
+    project: OwnedProject
+):
+    req = await db.execute(
+        select(ChatSession)
+        .where(ChatSession.user_id == current_user.id)
+        .where(ChatSession.project_id == project.id)
+    )
+
+    return [
+        ChatSessionResponse.model_validate(session) for session in req.scalars().all()
+    ]
 
 
 
