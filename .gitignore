@@ -10,3 +10,6 @@ wheels/
 .venv
 TODO.md
 .env
+memory
+.vscode
+.pytest_cache

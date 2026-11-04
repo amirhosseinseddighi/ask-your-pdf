@@ -135,7 +135,7 @@
 
           <div class="project-tabs">
             <button class="tab-btn tab-active" data-tab="documents">Documents</button>
-            <button class="tab-btn" data-tab="chat">Chat</button>
+            <button class="tab-btn" data-tab="chat" disabled title="At least one document must be ready before chatting">Chat</button>
           </div>
 
           <!-- Documents tab -->
@@ -171,7 +171,7 @@
             <div class="chat-shell">
               <div class="chat-header">
                 <span class="chat-badge">AI Assistant</span>
-                <span class="chat-status" id="chat-status">Ready</span>
+                <span class="chat-status chat-status-waiting" id="chat-status">Waiting for a ready document</span>
               </div>
               <div class="chat-messages" id="chat-messages">
                 <div class="msg msg-assistant">
@@ -180,8 +180,8 @@
               </div>
               <div class="chat-input-area">
                 <form id="chat-form" class="chat-form">
-                  <input type="text" id="chat-input" placeholder="Ask a question about your documents…" autocomplete="off" required />
-                  <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+                  <input type="text" id="chat-input" placeholder="Ask a question about your documents…" autocomplete="off" required disabled />
+                  <button type="submit" class="btn btn-primary" id="chat-send" disabled>Send</button>
                 </form>
                 <div id="chat-typing" class="chat-typing" style="display:none">Assistant is typing…</div>
               </div>

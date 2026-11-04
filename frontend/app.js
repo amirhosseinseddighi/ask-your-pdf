@@ -7,7 +7,7 @@ import {
   setToken, getToken, clearToken,
   login, register, me,
   listProjects, createProject, updateProject, deleteProject,
-  uploadDocument, deleteDocument,
+  uploadDocument, listDocuments, deleteDocument,
   createChatSession, getChatHistory, sendMessageStream,
 } from './api.js';
 
@@ -66,6 +66,7 @@ const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatMessages = document.getElementById('chat-messages');
 const chatTyping = document.getElementById('chat-typing');
+const chatStatus = document.getElementById('chat-status');
 
 /* Sidebar */
 const sidebar = document.getElementById('sidebar');
@@ -77,6 +78,7 @@ let currentProjectId = null;
 let currentChatSessionId = null;
 let activeTab = 'documents';
 let projectDocuments = new Map(); // projectId -> Document[]
+let documentsRefreshTimer = null;
 
 /* ---------- Helpers ---------- */
 function toast({ message, type = 'info', duration = 4000 } = {}) {
@@ -207,6 +209,7 @@ logoutBtn.addEventListener('click', () => {
   currentChatSessionId = null;
   activeTab = 'documents';
   projectDocuments.clear();
+  stopDocumentsRefresh();
   chatMessages.innerHTML = '';
   documentsList.innerHTML = '';
   projectsGrid.innerHTML = '';
@@ -347,6 +350,7 @@ backToProjects.addEventListener('click', () => {
   currentProjectId = null;
   currentChatSessionId = null;
   projectDocuments.clear();
+  stopDocumentsRefresh();
   pageProject.style.display = 'none';
   pageDashboard.style.display = 'block';
   chatMessages.innerHTML = '';
@@ -355,6 +359,7 @@ backToProjects.addEventListener('click', () => {
 
 async function openProject(id, name, description) {
   currentProjectId = id;
+  currentChatSessionId = null;
   projectTitle.textContent = escapeHtml(name);
   projectSubtitle.textContent = escapeHtml(description || 'No description');
 
@@ -367,6 +372,10 @@ async function openProject(id, name, description) {
 }
 
 async function setTab(tab) {
+  if (tab === 'chat' && !hasReadyDocument()) {
+    toast({ message: 'Chat is available after at least one document is ready.', type: 'warn' });
+    tab = 'documents';
+  }
   activeTab = tab;
   tabBtns.forEach(b => {
     b.classList.toggle('tab-active', b.dataset.tab === tab);
@@ -375,7 +384,7 @@ async function setTab(tab) {
   tabChat.style.display = tab === 'chat' ? 'block' : 'none';
   if (tab === 'documents') {
     documentsList.innerHTML = '';
-    await loadDocuments();
+    loadDocuments();
   } else if (tab === 'chat') {
     if (!currentChatSessionId) {
       try {
@@ -396,12 +405,55 @@ tabBtns.forEach(b => {
 /* ---------- Documents ---------- */
 async function loadDocuments() {
   if (!currentProjectId) return;
+  const projectId = currentProjectId;
   try {
-    const docs = projectDocuments.get(currentProjectId) || [];
-    renderDocuments(docs);
+    const docs = await listDocuments(projectId);
+    if (currentProjectId !== projectId) return;
+    const normalizedDocs = (docs || []).map((doc) => ({
+      id: doc.document_id,
+      filename: doc.filename,
+      status: String(doc.status || 'pending').toLowerCase(),
+    }));
+    projectDocuments.set(projectId, normalizedDocs);
+    updateChatAvailability();
+    renderDocuments(normalizedDocs);
+    if (normalizedDocs.some((doc) => doc.status !== 'ready')) {
+      startDocumentsRefresh();
+    } else {
+      stopDocumentsRefresh();
+    }
   } catch (err) {
     toast({ message: 'Failed to load documents', type: 'error' });
   }
+}
+
+function hasReadyDocument() {
+  const docs = projectDocuments.get(currentProjectId) || [];
+  return docs.some((doc) => doc.status === 'ready');
+}
+
+function updateChatAvailability() {
+  const chatAvailable = hasReadyDocument();
+  const chatTab = document.querySelector('.tab-btn[data-tab="chat"]');
+  chatTab.disabled = !chatAvailable;
+  chatTab.title = chatAvailable ? '' : 'At least one document must be ready before chatting';
+  chatInput.disabled = !chatAvailable;
+  chatSend.disabled = !chatAvailable;
+  chatStatus.textContent = chatAvailable ? 'Ready' : 'Waiting for a ready document';
+  chatStatus.classList.toggle('chat-status-waiting', !chatAvailable);
+}
+
+function startDocumentsRefresh() {
+  if (documentsRefreshTimer) return;
+  documentsRefreshTimer = setInterval(() => {
+    if (currentProjectId) loadDocuments();
+  }, 3000);
+}
+
+function stopDocumentsRefresh() {
+  if (!documentsRefreshTimer) return;
+  clearInterval(documentsRefreshTimer);
+  documentsRefreshTimer = null;
 }
 
 function renderDocuments(docs) {
@@ -423,7 +475,7 @@ function renderDocuments(docs) {
         <span class="doc-icon">📄</span>
         <div>
           <div class="doc-title">${escapeHtml(doc.filename || 'Untitled')}</div>
-          <div class="doc-meta">${doc.id} • ${escapeHtml(doc.status || 'pending')}</div>
+          <div class="doc-meta">Document ${doc.id} • ${escapeHtml(doc.status || 'pending')}</div>
         </div>
       </div>
       <span class="document-status ${statusClass}">${escapeHtml(doc.status || 'pending')}</span>
@@ -445,10 +497,7 @@ async function deleteDocumentConfirmed(projectId, documentId) {
   try {
     await deleteDocument(projectId, documentId);
     toast({ message: 'Document deleted', type: 'success' });
-    const docs = projectDocuments.get(projectId) || [];
-    const updated = docs.filter(d => d.id !== documentId);
-    projectDocuments.set(projectId, updated);
-    renderDocuments(updated);
+    await loadDocuments();
   } catch (err) {
     toast({ message: err.message || 'Failed to delete document', type: 'error' });
   }
@@ -515,16 +564,6 @@ async function handleFileSelection(file) {
       fileInput.value = '';
       toast({ message: 'Document uploaded', type: 'success' });
 
-      // Track the uploaded document locally (no list-documents endpoint exists).
-      const doc = {
-        id: res.document_id,
-        filename: file.name,
-        status: res.status || 'pending',
-      };
-      const docs = projectDocuments.get(currentProjectId) || [];
-      docs.push(doc);
-      projectDocuments.set(currentProjectId, docs);
-
       loadDocuments();
     }, 400);
   } catch (err) {
@@ -566,6 +605,10 @@ chatForm.addEventListener('submit', async (e) => {
   if (!text) return;
   if (!currentProjectId) {
     toast({ message: 'No project selected', type: 'error' });
+    return;
+  }
+  if (!hasReadyDocument()) {
+    toast({ message: 'Chat is available after at least one document is ready.', type: 'warn' });
     return;
   }
 

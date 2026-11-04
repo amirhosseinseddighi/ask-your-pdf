@@ -82,7 +82,7 @@ class ChatService:
 
         async with AsyncSessionLocal() as db:
             req = await db.execute(statement)
-            results = req.all()
+            results = req.scalars().all()
 
         history = list()
         for chat_message in results:

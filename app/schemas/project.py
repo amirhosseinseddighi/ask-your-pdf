@@ -31,6 +31,7 @@ class ProjectResponse(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class DocumentUploadResponse(BaseModel):
+class DocumentResponse(BaseModel):
     document_id: int
+    filename: str
     status: DocumentState

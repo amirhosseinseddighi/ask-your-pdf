@@ -133,7 +133,12 @@ export async function uploadDocument(projectId, file) {
   const form = new FormData();
   form.append('pdf_document', file);
   const { data } = await request(`/projects/${projectId}/documents`, { method: 'POST', body: form, formData: true });
-  return data; // DocumentUploadResponse { document_id, status }
+  return data; // DocumentResponse { document_id, status }
+}
+
+export async function listDocuments(projectId) {
+  const { data } = await request(`/projects/${projectId}/documents`);
+  return data; // DocumentResponse[] { document_id, filename, status }
 }
 
 export async function deleteDocument(projectId, documentId) {

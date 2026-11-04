@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.models import ChatSession, DocumentState, Documents, Project
 from app.schemas.chat import ChatSessionResponse
-from app.schemas.project import DocumentUploadResponse, ProjectCreate, ProjectResponse, ProjectUpdate
+from app.schemas.project import DocumentResponse, ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.deps import CurrentUser, LLMClient, OwnedDocument, OwnedProject, SessionDep
 from sqlalchemy import delete as SQLDelete
 from app.services.document_service import ingest_document
@@ -182,12 +182,25 @@ async def get_all_chat_sessions(
 
 
 # ==================== DOCUMENTS ====================
+@router.get("/{project_id}/documents", response_model=list[DocumentResponse])
+async def get_all_documents(
+    db: SessionDep,
+    project: OwnedProject,
+    current_user: CurrentUser
+):
+    req = await db.execute(select(Documents).where(Documents.project_id == project.id))
+    return [
+        DocumentResponse(document_id=doc.id, status=doc.status, filename=doc.filename)
+        for doc in req.scalars().all()
+    ]
+
 @router.post(
     "/{project_id}/documents",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=DocumentUploadResponse,
+    response_model=DocumentResponse,
 )
 async def upload_document_pdf(
+    current_user: CurrentUser,
     pdf_document: Annotated[UploadFile, File(description="PDF Document")],
     background_tasks: BackgroundTasks,
     llm_client: LLMClient,
@@ -268,7 +281,7 @@ async def upload_document_pdf(
             file_path=str(dst_path),
         )
         handed_off = True
-        return DocumentUploadResponse(document_id=new_doc.id, status=new_doc.status)
+        return DocumentResponse(document_id=new_doc.id, status=new_doc.status, filename=original_name)
 
     except HTTPException:
         raise
@@ -280,10 +293,6 @@ async def upload_document_pdf(
     finally:
         if not handed_off:
             dst_path.unlink(missing_ok=True)
-
-    
-
-
 
 
 @router.delete(
