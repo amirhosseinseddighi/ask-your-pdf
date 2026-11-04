@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 import structlog
 
 from app.core.deps import CurrentUser, LLMClient, SessionDep
@@ -14,7 +14,7 @@ from app.helpers.chat_and_project_helpers import (
     check_project_exists_and_belong_to_the_user
 )
 from app.models import ChatSession
-from app.schemas.chat import ChatMessageRequest, CreateChatSessionRequest, CreateChatSessionResponse
+from app.schemas.chat import ChatMessageRequest, ChatSessionResponse, CreateChatSessionRequest, CreateChatSessionResponse, UpdateChatSessionRequest
 from app.services.chat_service import chat_service
 
 
@@ -114,3 +114,45 @@ async def do_chat(
 
     
 
+@router.patch("/{chat_id}", response_model=ChatSessionResponse)
+async def update_chat_title(
+    current_user: CurrentUser,
+    chat_id: UUID,
+    body: UpdateChatSessionRequest,
+    db: SessionDep,
+):
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == chat_id,
+            ChatSession.user_id == current_user.id,
+        )
+    )
+    chat_session = result.scalar_one_or_none()
+    if not chat_session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    chat_session.title = body.title
+    await db.commit()
+    await db.refresh(chat_session)
+    return chat_session
+
+
+@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_chat_session(
+    current_user: CurrentUser,
+    chat_id: UUID,
+    db: SessionDep,
+):
+    result = await db.execute(
+        delete(ChatSession)
+        .where(
+            ChatSession.id == chat_id,
+            ChatSession.user_id == current_user.id,
+        )
+        .returning(ChatSession.id)
+    )
+    if result.scalar_one_or_none() is None:
+        await db.rollback()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    await db.commit()

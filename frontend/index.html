@@ -168,22 +168,32 @@
 
           <!-- Chat tab -->
           <div id="tab-chat" class="tab-panel" style="display:none">
-            <div class="chat-shell">
-              <div class="chat-header">
-                <span class="chat-badge">AI Assistant</span>
-                <span class="chat-status chat-status-waiting" id="chat-status">Waiting for a ready document</span>
-              </div>
-              <div class="chat-messages" id="chat-messages">
-                <div class="msg msg-assistant">
-                  <div class="msg-bubble">Hi! Upload some PDFs to this project, then ask me anything about them.</div>
+            <div class="chat-layout">
+              <aside class="chat-sessions">
+                <div class="chat-sessions-header">
+                  <h3>Conversations</h3>
+                  <button class="btn btn-primary btn-sm" id="new-chat-btn">+ New chat</button>
                 </div>
-              </div>
-              <div class="chat-input-area">
-                <form id="chat-form" class="chat-form">
-                  <input type="text" id="chat-input" placeholder="Ask a question about your documents…" autocomplete="off" required disabled />
-                  <button type="submit" class="btn btn-primary" id="chat-send" disabled>Send</button>
-                </form>
-                <div id="chat-typing" class="chat-typing" style="display:none">Assistant is typing…</div>
+                <div class="chat-sessions-list" id="chat-sessions-list"></div>
+                <p class="chat-sessions-empty" id="chat-sessions-empty">No conversations yet.</p>
+              </aside>
+              <div class="chat-shell">
+                <div class="chat-header">
+                  <span class="chat-badge">AI Assistant</span>
+                  <span class="chat-status chat-status-waiting" id="chat-status">Waiting for a ready document</span>
+                </div>
+                <div class="chat-messages" id="chat-messages">
+                  <div class="msg msg-assistant">
+                    <div class="msg-bubble">Select a conversation or start a new one.</div>
+                  </div>
+                </div>
+                <div class="chat-input-area">
+                  <form id="chat-form" class="chat-form">
+                    <input type="text" id="chat-input" placeholder="Ask a question about your documents…" autocomplete="off" required disabled />
+                    <button type="submit" class="btn btn-primary" id="chat-send" disabled>Send</button>
+                  </form>
+                  <div id="chat-typing" class="chat-typing" style="display:none">Assistant is typing…</div>
+                </div>
               </div>
             </div>
           </div>

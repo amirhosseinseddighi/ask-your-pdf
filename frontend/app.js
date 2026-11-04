@@ -8,7 +8,8 @@ import {
   login, register, me,
   listProjects, createProject, updateProject, deleteProject,
   uploadDocument, listDocuments, deleteDocument,
-  createChatSession, getChatHistory, sendMessageStream,
+  createChatSession, listChatSessions, updateChatSessionTitle, deleteChatSession,
+  getChatHistory, sendMessageStream,
 } from './api.js';
 
 /* ---------- DOM elements ---------- */
@@ -67,6 +68,9 @@ const chatSend = document.getElementById('chat-send');
 const chatMessages = document.getElementById('chat-messages');
 const chatTyping = document.getElementById('chat-typing');
 const chatStatus = document.getElementById('chat-status');
+const chatSessionsList = document.getElementById('chat-sessions-list');
+const chatSessionsEmpty = document.getElementById('chat-sessions-empty');
+const newChatBtn = document.getElementById('new-chat-btn');
 
 /* Sidebar */
 const sidebar = document.getElementById('sidebar');
@@ -78,6 +82,7 @@ let currentProjectId = null;
 let currentChatSessionId = null;
 let activeTab = 'documents';
 let projectDocuments = new Map(); // projectId -> Document[]
+let projectChatSessions = new Map(); // projectId -> ChatSession[]
 let documentsRefreshTimer = null;
 
 /* ---------- Helpers ---------- */
@@ -209,6 +214,7 @@ logoutBtn.addEventListener('click', () => {
   currentChatSessionId = null;
   activeTab = 'documents';
   projectDocuments.clear();
+  projectChatSessions.clear();
   stopDocumentsRefresh();
   chatMessages.innerHTML = '';
   documentsList.innerHTML = '';
@@ -350,6 +356,7 @@ backToProjects.addEventListener('click', () => {
   currentProjectId = null;
   currentChatSessionId = null;
   projectDocuments.clear();
+  projectChatSessions.clear();
   stopDocumentsRefresh();
   pageProject.style.display = 'none';
   pageDashboard.style.display = 'block';
@@ -360,6 +367,7 @@ backToProjects.addEventListener('click', () => {
 async function openProject(id, name, description) {
   currentProjectId = id;
   currentChatSessionId = null;
+  projectChatSessions.delete(id);
   projectTitle.textContent = escapeHtml(name);
   projectSubtitle.textContent = escapeHtml(description || 'No description');
 
@@ -386,15 +394,8 @@ async function setTab(tab) {
     documentsList.innerHTML = '';
     loadDocuments();
   } else if (tab === 'chat') {
-    if (!currentChatSessionId) {
-      try {
-        const res = await createChatSession(currentProjectId);
-        currentChatSessionId = res.chat_session_id;
-      } catch (err) {
-        toast({ message: 'Failed to start chat session', type: 'error' });
-      }
-    }
-    await loadChatHistory();
+    await loadChatSessions();
+    updateChatAvailability();
   }
 }
 
@@ -574,6 +575,139 @@ async function handleFileSelection(file) {
 }
 
 /* ---------- Chat ---------- */
+async function loadChatSessions() {
+  if (!currentProjectId) return;
+  const projectId = currentProjectId;
+  try {
+    const sessions = await listChatSessions(projectId);
+    if (currentProjectId !== projectId) return;
+    projectChatSessions.set(projectId, sessions || []);
+    renderChatSessions(sessions || []);
+  } catch (err) {
+    toast({ message: err.message || 'Failed to load chat sessions', type: 'error' });
+  }
+}
+
+function formatChatSessionTitle(session) {
+  if (session.title) return session.title;
+  if (session.created_at) {
+    return `Chat from ${new Date(session.created_at).toLocaleString()}`;
+  }
+  return 'New chat';
+}
+
+function renderChatSessions(sessions) {
+  chatSessionsList.innerHTML = '';
+  chatSessionsEmpty.style.display = sessions.length ? 'none' : 'block';
+
+  for (const session of sessions) {
+    const item = document.createElement('div');
+    item.className = 'chat-session-item';
+    item.classList.toggle('chat-session-active', session.id === currentChatSessionId);
+
+    const selectButton = document.createElement('button');
+    selectButton.type = 'button';
+    selectButton.className = 'chat-session-select';
+    selectButton.innerHTML = `
+      <span class="chat-session-title">${escapeHtml(formatChatSessionTitle(session))}</span>
+      <span class="chat-session-date">${escapeHtml(session.created_at ? new Date(session.created_at).toLocaleDateString() : '')}</span>
+    `;
+    selectButton.addEventListener('click', () => selectChatSession(session.id));
+
+    const actions = document.createElement('div');
+    actions.className = 'chat-session-actions';
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'btn-icon';
+    editButton.title = 'Edit chat title';
+    editButton.textContent = '✏️';
+    editButton.addEventListener('click', () => editChatSessionTitle(session));
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'btn-icon';
+    deleteButton.title = 'Delete chat session';
+    deleteButton.textContent = '🗑️';
+    deleteButton.addEventListener('click', () => deleteChatSessionConfirmed(session));
+
+    actions.append(editButton, deleteButton);
+    item.append(selectButton, actions);
+    chatSessionsList.appendChild(item);
+  }
+}
+
+async function editChatSessionTitle(session) {
+  const title = prompt('Chat title', session.title || '');
+  if (title === null) return;
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    toast({ message: 'Chat title cannot be empty', type: 'error' });
+    return;
+  }
+
+  try {
+    const updated = await updateChatSessionTitle(session.id, trimmedTitle);
+    const sessions = projectChatSessions.get(currentProjectId) || [];
+    const index = sessions.findIndex((item) => item.id === session.id);
+    if (index !== -1) sessions[index] = updated;
+    renderChatSessions(sessions);
+    toast({ message: 'Chat title updated', type: 'success' });
+  } catch (err) {
+    toast({ message: err.message || 'Failed to update chat title', type: 'error' });
+  }
+}
+
+async function deleteChatSessionConfirmed(session) {
+  if (!confirm(`Delete "${formatChatSessionTitle(session)}"? This cannot be undone.`)) return;
+
+  try {
+    await deleteChatSession(session.id);
+    const sessions = (projectChatSessions.get(currentProjectId) || [])
+      .filter((item) => item.id !== session.id);
+    projectChatSessions.set(currentProjectId, sessions);
+
+    if (currentChatSessionId === session.id) {
+      currentChatSessionId = null;
+      chatMessages.innerHTML = `
+        <div class="msg msg-assistant">
+          <div class="msg-bubble">Select a conversation or start a new one.</div>
+        </div>
+      `;
+    }
+    renderChatSessions(sessions);
+    toast({ message: 'Chat session deleted', type: 'success' });
+  } catch (err) {
+    toast({ message: err.message || 'Failed to delete chat session', type: 'error' });
+  }
+}
+
+async function selectChatSession(sessionId) {
+  if (!hasReadyDocument()) {
+    toast({ message: 'Chat is available after at least one document is ready.', type: 'warn' });
+    return;
+  }
+  currentChatSessionId = sessionId;
+  renderChatSessions(projectChatSessions.get(currentProjectId) || []);
+  await loadChatHistory();
+}
+
+function startNewChat() {
+  if (!hasReadyDocument()) {
+    toast({ message: 'Chat is available after at least one document is ready.', type: 'warn' });
+    return;
+  }
+  currentChatSessionId = null;
+  renderChatSessions(projectChatSessions.get(currentProjectId) || []);
+  chatMessages.innerHTML = `
+    <div class="msg msg-assistant">
+      <div class="msg-bubble">Start a new conversation about your documents.</div>
+    </div>
+  `;
+  chatInput.focus();
+}
+
+newChatBtn.addEventListener('click', startNewChat);
+
 function addMessage(role, text) {
   const div = document.createElement('div');
   div.className = `msg msg-${role}`;
@@ -588,8 +722,10 @@ function addMessage(role, text) {
 
 async function loadChatHistory() {
   if (!currentChatSessionId) return;
+  const sessionId = currentChatSessionId;
   try {
-    const history = await getChatHistory(currentChatSessionId);
+    const history = await getChatHistory(sessionId);
+    if (currentChatSessionId !== sessionId) return;
     chatMessages.innerHTML = '';
     for (const m of history) {
       addMessage(m.role, m.content);
@@ -633,6 +769,8 @@ chatForm.addEventListener('submit', async (e) => {
     if (!currentChatSessionId) {
       const res = await createChatSession(currentProjectId);
       currentChatSessionId = res.chat_session_id;
+      await loadChatSessions();
+      renderChatSessions(projectChatSessions.get(currentProjectId) || []);
     }
 
     for await (const event of sendMessageStream(currentChatSessionId, text)) {

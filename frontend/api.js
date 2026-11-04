@@ -151,9 +151,26 @@ export async function createChatSession(projectId) {
   return data; // { chat_session_id: UUID }
 }
 
+export async function listChatSessions(projectId) {
+  const { data } = await request(`/projects/${projectId}/chats`);
+  return data; // [{ id, title, created_at }]
+}
+
 export async function getChatHistory(chatId) {
   const { data } = await request(`/chat/${encodeURIComponent(chatId)}`);
   return data; // [{ role, content }]
+}
+
+export async function updateChatSessionTitle(chatId, title) {
+  const { data } = await request(`/chat/${encodeURIComponent(chatId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+  return data; // { id, title, created_at }
+}
+
+export async function deleteChatSession(chatId) {
+  await request(`/chat/${encodeURIComponent(chatId)}`, { method: 'DELETE' });
 }
 
 /**
