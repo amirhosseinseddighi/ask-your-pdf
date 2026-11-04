@@ -15,7 +15,7 @@ from app.schemas.chat import ChatSessionResponse
 from app.schemas.project import DocumentResponse, ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.deps import CurrentUser, LLMClient, OwnedDocument, OwnedProject, SessionDep
 from sqlalchemy import delete as SQLDelete
-from app.services.document_service import ingest_document
+from app.services.ingestion_service import pdf_ingestor
 
 
 logger = structlog.get_logger()
@@ -274,11 +274,11 @@ async def upload_document_pdf(
         await db.refresh(new_doc)
 
         background_tasks.add_task(
-            ingest_document,
+            pdf_ingestor.ingest,
             project_id=project.id,
             doc_id=new_doc.id,
             client=llm_client,
-            file_path=str(dst_path),
+            document_path=str(dst_path),
         )
         handed_off = True
         return DocumentResponse(document_id=new_doc.id, status=new_doc.status, filename=original_name)
